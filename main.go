@@ -20,22 +20,18 @@ const (
 
 func reqInterceptor(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Println("Executing reqInterceptor")
-		traceID, spanID, ok := tracer.ExtractTraceInfo(r.Context())
-		if ok {
-			log.Println("Trace ID received from Service A is: ", traceID, " and Span ID is:", spanID)
-		}
+
+		log.Println(fmt.Sprintf("Incoming request headers.... %v",r.Header))
+
 		next.ServeHTTP(w, r)
 	})
 }
 
 func requestHandler(w http.ResponseWriter, r *http.Request) {
-	traceID, spanID, ok := tracer.ExtractTraceInfo(r.Context())
-	if ok {
-		log.Println("Trace ID for this request in", applicationName, " is:", traceID, " and Span ID is:", spanID)
-	}
+	traceID, spanID, _ := tracer.ExtractTraceInfo(r.Context())
+	log.Println(fmt.Sprintf("Trace ID for this request in %s is: %s and Span Id is: %s", applicationName, traceID, spanID))
+
 	fmt.Println("Request Received...")
-	w.Write([]byte("Request Received..."))
 }
 
 func getViper() *viper.Viper {
@@ -59,7 +55,6 @@ func getViper() *viper.Viper {
 
 func initTracing(v *viper.Viper, appName string) (tracer.Tracing, error) {
 	var tracing = tracer.Tracing{
-		Enabled:        false,
 		Propagator:     propagation.TraceContext{},
 		TracerProvider: trace.NewNoopTracerProvider(),
 	}
@@ -73,9 +68,7 @@ func initTracing(v *viper.Viper, appName string) (tracer.Tracing, error) {
 	if err != nil {
 		return tracer.Tracing{}, err
 	}
-	if len(traceConfig.Provider) != 0 && traceConfig.Provider != tracer.DefaultTracerProvider {
-		tracing.Enabled = true
-	}
+
 	tracing.TracerProvider = tracerProvider
 	return tracing, nil
 }
@@ -90,8 +83,7 @@ func main() {
 		return
 	}
 
-	log.Println( "tracing status enabled", tracing.Enabled)
-
+	// Auto instrumentation options of mux router.
 	otelMuxOptions := []otelmux.Option{
 		otelmux.WithPropagators(tracing.Propagator),
 		otelmux.WithTracerProvider(tracing.TracerProvider),
@@ -100,6 +92,7 @@ func main() {
 	r := mux.NewRouter()
 
 	r.Use(otelmux.Middleware("primary", otelMuxOptions...), reqInterceptor, tracer.EchoFirstTraceNodeInfo(tracing.Propagator))
+
 	r.HandleFunc("/", requestHandler)
 	err1 := http.ListenAndServe(":"+v.GetString("port"), r)
 	log.Fatal(err1)
